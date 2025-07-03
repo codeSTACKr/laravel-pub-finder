@@ -97,9 +97,6 @@ class ResponseService
                     'rating' => 1,
                     'reviews' => 1,
                     'GoogleMapURI' => 1,
-                    'url' => 1,  // In case it's stored as 'url'
-                    'google_maps_url' => 1,  // In case it's stored differently
-                    'maps_url' => 1,  // Another possible field name
                     'similarityScore' => 1,
                     'calculatedDistance' => 1
                 ]
@@ -112,11 +109,7 @@ class ResponseService
             $distance = $this->formatDistance($result, $referenceLat, $referenceLng);
             
             // Try different possible field names for Google Maps URL
-            $googleMapUrl = $result['GoogleMapURI'] ?? 
-                           $result['url'] ?? 
-                           $result['google_maps_url'] ?? 
-                           $result['maps_url'] ?? 
-                           '#';
+            $googleMapUrl = $result['GoogleMapURI'] ??  '#';
             
             return [
                 'name' => $result['name'] ?? 'Unnamed Pub',
