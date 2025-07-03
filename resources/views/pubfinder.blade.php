@@ -1,3 +1,5 @@
+@php use Illuminate\Support\Str; @endphp
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -20,7 +22,7 @@
         <div class="flex justify-center mb-10">
             <form method="POST" action="{{ route('search.perform') }}" class="flex w-full max-w-2xl">
                 @csrf
-                <input type="text" name="query" placeholder="Guinness with outdoor seating"
+                <input type="text" name="query" placeholder="Craft beers with outdoor seating"
                     value="{{ $query ?? '' }}"
                     class="flex-1 border-2 border-gray-300 rounded-l-lg px-6 py-3 text-lg focus:outline-none focus:border-red-500">
                 <button type="submit" class="bg-red-500 text-white px-8 py-3 rounded-r-lg hover:bg-red-600 font-semibold text-lg">
@@ -29,14 +31,32 @@
             </form>
         </div>
 
+        <!-- Results Header -->
+        @if (!empty($results))
+            <div class="mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">
+                    Results for "{{ $query }}"
+                </h2>
+            </div>
+        @endif
+
         <!-- Search Results -->
         @if (!empty($results))
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div class="space-y-6">
                 @foreach ($results as $result)
                     <div class="bg-white border border-gray-200 rounded-lg p-6 shadow-lg hover:shadow-xl transition-shadow">
-                        <!-- Pub Name -->
-                        <h2 class="text-2xl font-bold text-gray-800 mb-3">{{ $result['name'] }}</h2>
-                        
+                        <!-- Pub Name as Google Maps Link -->
+                        <h3 class="text-2xl font-bold text-gray-800 mb-3">
+                            <a href="{{ $result['GoogleMapURI'] ?? '#' }}" target="_blank" class="text-blue-600 hover:underline">
+                                {{ $result['name'] }}
+                            </a>
+                        </h3>
+
+                        <!-- Address -->
+                        <div class="text-gray-600 mb-3">
+                            <strong>Address:</strong> {{ $result['formatted_address'] }}
+                        </div>
+
                         <!-- Rating Stars -->
                         <div class="flex items-center mb-3">
                             @for ($i = 1; $i <= 5; $i++)
@@ -46,6 +66,7 @@
                                     <span class="text-gray-300 text-xl">★</span>
                                 @endif
                             @endfor
+                            <span class="ml-2 text-gray-600">({{ number_format($result['rating'], 1) }})</span>
                         </div>
 
                         <!-- Distance -->
@@ -56,10 +77,18 @@
                             <span class="font-medium">{{ $result['distance'] }}</span>
                         </div>
 
-                        
+                        <!-- Complete Reviews Section -->
+                        @if (!empty($result['reviews']) && $result['reviews'] !== 'No reviews available.')
+                            <div class="mt-4 p-4 bg-gray-50 rounded-lg">
+                                <h4 class="font-semibold text-gray-800 mb-2">Review (excerpt):</h4>
+                                <div class="text-gray-700 leading-relaxed">
+                                    {{ $result['reviews'] }}
+                                </div>
+                            </div>
+                        @endif
 
                         <!-- Similarity Score -->
-                        <div class="text-xs text-gray-500 pt-3 border-t border-gray-100">
+                        <div class="text-xs text-gray-500 pt-3 border-t border-gray-100 mt-4">
                             <span class="font-medium">Similarity Score: {{ $result['similarityScore'] }}</span>
                         </div>
                     </div>

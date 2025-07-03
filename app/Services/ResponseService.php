@@ -31,7 +31,7 @@ class ResponseService
         $cursor = $collection->aggregate([
             [
                 '$vectorSearch' => [
-                    'index' => 'default',
+                    'index' => 'vector_index',
                     'path' => 'embedding',
                     'queryVector' => $embedding,
                     'limit' => 5,
@@ -96,6 +96,10 @@ class ResponseService
                     'formatted_address' => 1,
                     'rating' => 1,
                     'reviews' => 1,
+                    'GoogleMapURI' => 1,
+                    'url' => 1,  // In case it's stored as 'url'
+                    'google_maps_url' => 1,  // In case it's stored differently
+                    'maps_url' => 1,  // Another possible field name
                     'similarityScore' => 1,
                     'calculatedDistance' => 1
                 ]
@@ -107,12 +111,20 @@ class ResponseService
         return array_map(function($result) use ($referenceLat, $referenceLng) {
             $distance = $this->formatDistance($result, $referenceLat, $referenceLng);
             
+            // Try different possible field names for Google Maps URL
+            $googleMapUrl = $result['GoogleMapURI'] ?? 
+                           $result['url'] ?? 
+                           $result['google_maps_url'] ?? 
+                           $result['maps_url'] ?? 
+                           '#';
+            
             return [
                 'name' => $result['name'] ?? 'Unnamed Pub',
                 'formatted_address' => $result['formatted_address'] ?? '',
                 'rating' => $result['rating'] ?? 0,
-                'reviews' => $result['reviews'] ?? [],
+                'reviews' => $result['reviews'] ?? 'No reviews available.',
                 'distance' => $distance,
+                'GoogleMapURI' => $googleMapUrl,
                 'similarityScore' => number_format($result['similarityScore'] ?? 0, 8)
             ];
         }, $results);
