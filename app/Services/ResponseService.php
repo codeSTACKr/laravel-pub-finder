@@ -9,17 +9,22 @@ class ResponseService
 {
     protected $voyageApiKey;
     protected $mongoClient;
+    protected $openaiApiKey;
 
     public function __construct()
     {
         $this->voyageApiKey = env('VOYAGE_API_KEY');
+        $this->openaiApiKey = env('OPENAI_API_KEY');
         $this->mongoClient = new Client(env('MONGODB_URI'));
     }
 
     public function search(string $query, $referenceLat = null, $referenceLng = null)
     {
+        if (!$this->isValidPubQuery($query)) {
+            throw new \Exception('Not a valid search string. Please search for pubs, bars, breweries, or beer-related terms.');
+        }
+
         $embedding = $this->getEmbedding($query);
-        
         
         $referenceLat = $referenceLat ?? 39.7392; 
         $referenceLng = $referenceLng ?? -104.9903; 
@@ -34,8 +39,8 @@ class ResponseService
                     'index' => 'vector_index',
                     'path' => 'embedding',
                     'queryVector' => $embedding,
-                    'limit' => 5,
-                    'numCandidates' => 100
+                    'limit' => 20, 
+                    'numCandidates' => 200
                 ]
             ],
             [
@@ -83,12 +88,30 @@ class ResponseService
                     ]
                 ]
             ],
+            
+            [
+                '$match' => [
+                    '$or' => [
+                        ['name' => ['$regex' => '(?i).*(pub|bar|brewery|taproom|tavern|saloon|lounge|ale|beer|craft|brewing|brewpub).*']],
+                        ['formatted_address' => ['$regex' => '(?i).*(pub|bar|brewery|taproom|tavern|saloon|lounge|ale|beer|craft|brewing|brewpub).*']],
+                        ['reviews' => ['$regex' => '(?i).*(pub|bar|brewery|taproom|tavern|saloon|lounge|ale|beer|craft|brewing|brewpub|drink|alcohol|pint|draft|draught).*']],
+                        
+                        ['$and' => [
+                            ['name' => ['$not' => ['$regex' => '(?i).*(dunkin|starbucks|mcdonalds|burger|pizza|taco|subway|wendys|kfc|arbys|dominos|papa|chipotle|qdoba|panera).*']]],
+                            ['formatted_address' => ['$not' => ['$regex' => '(?i).*(dunkin|starbucks|mcdonalds|burger|pizza|taco|subway|wendys|kfc|arbys|dominos|papa|chipotle|qdoba|panera).*']]]
+                        ]]
+                    ]
+                ]
+            ],
             [
                 '$sort' => [
                     'similarityScore' => -1,
                     'calculatedDistance' => 1
                 ]
-                ],
+            ],
+            [
+                '$limit' => 5 
+            ],
             [
                 '$project' => [
                     '_id' => 0,
@@ -105,17 +128,19 @@ class ResponseService
     
         $results = $cursor->toArray();
 
-        return array_map(function($result) use ($referenceLat, $referenceLng) {
+        return array_map(function($result) use ($referenceLat, $referenceLng, $query) {
             $distance = $this->formatDistance($result, $referenceLat, $referenceLng);
             
-            // Try different possible field names for Google Maps URL
             $googleMapUrl = $result['GoogleMapURI'] ??  '#';
+            
+            
+            $summarizedReview = $this->summarizeReview($result['reviews'] ?? '', $query);
             
             return [
                 'name' => $result['name'] ?? 'Unnamed Pub',
                 'formatted_address' => $result['formatted_address'] ?? '',
                 'rating' => $result['rating'] ?? 0,
-                'reviews' => $result['reviews'] ?? 'No reviews available.',
+                'reviews' => $summarizedReview,
                 'distance' => $distance,
                 'GoogleMapURI' => $googleMapUrl,
                 'similarityScore' => number_format($result['similarityScore'] ?? 0, 8)
@@ -125,7 +150,6 @@ class ResponseService
     
     private function formatDistance($result, $referenceLat, $referenceLng)
     {
-        
         if (isset($result['calculatedDistance']) && $result['calculatedDistance'] !== null) {
             return number_format($result['calculatedDistance'], 1) . ' miles';
         }
@@ -137,7 +161,6 @@ class ResponseService
             return number_format($distance, 1) . ' miles';
         }
         
-        // If no coordinates available, return unknown
         return 'Distance unknown';
     }
     
@@ -162,6 +185,73 @@ class ResponseService
         return $earthRadius * $c;
     }
 
+    private function isValidPubQuery(string $query): bool
+    {
+        // List of valid pub/bar/brewery related keywords and phrases
+        $validKeywords = [
+            'pub', 'bar', 'brewery', 'brewpub', 'taproom', 'tavern', 'saloon', 'lounge',
+            'ale', 'beer', 'craft', 'brewing', 'brewhouse', 'gastropub', 'sports bar',
+            'dive bar', 'cocktail bar', 'wine bar', 'beer garden', 'microbrewery',
+            'distillery', 'whiskey', 'bourbon', 'vodka', 'gin', 'rum', 'tequila',
+            'drink', 'drinks', 'alcohol', 'alcoholic', 'pint', 'draft', 'draught',
+            'happy hour', 'nightlife', 'bartender', 'mixologist', 'cocktail', 'cocktails',
+            'ipa', 'lager', 'stout', 'porter', 'pilsner', 'wheat beer', 'pale ale',
+            'dark beer', 'light beer', 'local beer', 'craft beer', 'on tap',
+            'wine', 'spirits', 'liquor', 'martini', 'margarita', 'mojito',
+            'outdoor seating', 'live music', 'trivia night', 'karaoke', 'pool table',
+            'darts', 'game', 'games', 'watch', 'sports', 'tv', 'television'
+        ];
+
+        $query = strtolower(trim($query));
+        
+        
+        foreach ($validKeywords as $keyword) {
+            if (strpos($query, strtolower($keyword)) !== false) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    private function summarizeReview(string $reviews, string $query): string
+    {
+        if (empty($reviews) || $reviews === 'No reviews available.') {
+            return 'No reviews available.';
+        }
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => "Bearer {$this->openaiApiKey}",
+                'Content-Type' => 'application/json',
+            ])->timeout(10)->post('https://api.openai.com/v1/chat/completions', [
+                'model' => 'gpt-4o-mini',
+                'messages' => [
+                    [
+                        'role' => 'system',
+                        'content' => 'You are a helpful assistant that summarizes pub/bar/brewery reviews. Create a brief, relevant summary (max 100 words) focusing on aspects most relevant to the user\'s search query. Highlight key points about drinks, atmosphere, service, food, or specific features mentioned.'
+                    ],
+                    [
+                        'role' => 'user',
+                        'content' => "Search query: \"{$query}\"\n\nReviews to summarize:\n{$reviews}\n\nPlease provide a brief summary focusing on aspects most relevant to the search query."
+                    ]
+                ],
+                'max_tokens' => 150,
+                'temperature' => 0.3
+            ]);
+
+            if ($response->successful()) {
+                $content = $response->json()['choices'][0]['message']['content'] ?? '';
+                return !empty($content) ? trim($content) : 'Review summary unavailable.';
+            }
+        } catch (\Exception $e) {
+            // Log error if needed, but don't break the application
+            \Log::warning('OpenAI summarization failed: ' . $e->getMessage());
+        }
+
+        // Fallback: return truncated original reviews
+        return strlen($reviews) > 200 ? substr($reviews, 0, 197) . '...' : $reviews;
+    }
 
     public function getEmbedding(string $query): array
     {

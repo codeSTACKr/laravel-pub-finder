@@ -23,6 +23,10 @@ class SearchController extends Controller
     {
         $query = $request->input('query');
 
+        if (empty(trim($query))) {
+            return back()->withErrors(['error' => 'Please enter a search query.']);
+        }
+
         try {
             $results = $this->responseService->search($query);
         } catch (\Exception $e) {

@@ -8,4 +8,4 @@ use App\Http\Controllers\SearchController;
 Route::get('/', function () {
     return view('pubfinder');
 });
-Route::post('/search', [SearchController::class, 'perform'])->name('search.perform');
+Route::match(['GET', 'POST'], '/search', [SearchController::class, 'perform'])->name('search.perform');
